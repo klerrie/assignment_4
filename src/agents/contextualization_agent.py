@@ -22,9 +22,16 @@ class ContextualizationAgent:
     
     def __init__(self):
         """Initialize OpenAI client with OpenRouter configuration."""
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENAI_API_KEY not found in environment variables. "
+                "Please set it in your .env file."
+            )
+        
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=os.getenv("OPENAI_API_KEY")
+            api_key=api_key
         )
         self.model = "openai/gpt-4o"
         self.agent_name = "ContextualizationAgent"
@@ -95,13 +102,27 @@ Provide a structured analysis including:
                 temperature=0.2  # Low temperature for consistent analysis
             )
             
-            analysis_output = response.choices[0].message.content
+            # Extract response content - safely check all nested attributes
+            if not response.choices or len(response.choices) == 0:
+                raise RuntimeError("Empty response from API - no choices returned")
+            
+            first_choice = response.choices[0]
+            if first_choice is None:
+                raise RuntimeError("Empty response from API - first choice is None")
+            
+            if not hasattr(first_choice, 'message') or first_choice.message is None:
+                raise RuntimeError("Empty response from API - message is missing or None")
+            
+            if not hasattr(first_choice.message, 'content') or first_choice.message.content is None:
+                raise RuntimeError("Empty response from API - content is missing or None")
+            
+            analysis_output = first_choice.message.content
             
             # Log generation to trace
             usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
+                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                "total_tokens": response.usage.total_tokens if response.usage else 0
             }
             
             tracing_manager.create_generation(
