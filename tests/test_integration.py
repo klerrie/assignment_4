@@ -13,11 +13,10 @@ from src.models import ContractChangeOutput
 class TestIntegration:
     """End-to-end integration test suite."""
     
-    @patch('src.image_parser.ImageParser')
-    @patch('src.agents.contextualization_agent.ContextualizationAgent')
-    @patch('src.agents.extraction_agent.ExtractionAgent')
-    @patch('sys.argv')
-    def test_end_to_end_workflow(self, mock_argv, mock_extraction_agent, mock_context_agent, mock_image_parser):
+    @patch('src.main.ImageParser')
+    @patch('src.main.ContextualizationAgent')
+    @patch('src.main.ExtractionAgent')
+    def test_end_to_end_workflow(self, mock_extraction_agent, mock_context_agent, mock_image_parser):
         """Test complete end-to-end workflow."""
         # Create temporary image files
         with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp1, \
@@ -28,13 +27,26 @@ class TestIntegration:
             amendment_path = tmp2.name
         
         try:
-            # Mock command line arguments
-            mock_argv.__getitem__.side_effect = lambda x: {
-                0: 'main.py',
-                1: original_path,
-                2: amendment_path
-            }[x]
-            mock_argv.__len__.return_value = 3
+            # Mock command line arguments - create a list-like object that supports slicing
+            argv_list = ['main.py', original_path, amendment_path]
+            
+            # Create a custom class that behaves like sys.argv
+            class MockArgv:
+                def __init__(self, values):
+                    self.values = values
+                
+                def __getitem__(self, key):
+                    if isinstance(key, slice):
+                        return self.values[key]
+                    return self.values[key]
+                
+                def __len__(self):
+                    return len(self.values)
+            
+            # Replace sys.argv with our custom class
+            import sys
+            original_argv = sys.argv
+            sys.argv = MockArgv(argv_list)
             
             # Mock image parser
             mock_parser_instance = MagicMock()
@@ -82,5 +94,8 @@ class TestIntegration:
             assert "analysis" in context_output
             
         finally:
+            # Restore original sys.argv
+            import sys
+            sys.argv = original_argv
             os.unlink(original_path)
             os.unlink(amendment_path)

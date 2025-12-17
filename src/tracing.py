@@ -75,28 +75,42 @@ class TracingManager:
             return DummyTrace()
         
         trace_metadata = {
-            "session_id": session_id,
             "contract_id": contract_id,
             **(metadata or {})
         }
         
-        # Use Langfuse 2.x API - trace() method
+        # Use Langfuse 2.x API - start_as_current_span creates a trace automatically
         try:
-            trace = self.client.trace(
+            # In Langfuse 2.x, the first span becomes the root span (trace)
+            span_context = self.client.start_as_current_span(
                 name=name,
-                metadata=trace_metadata,
-                session_id=session_id
+                metadata=trace_metadata
             )
-            return trace
+            # Enter the context to get the span object
+            span_obj = span_context.__enter__()
+            # Update the trace with session_id (must be done separately)
+            self.client.update_current_trace(session_id=session_id)
+            # Wrap the span in a TraceWrapper to provide trace-like interface
+            return TraceWrapper(span_obj, span_context)
         except AttributeError:
-            # trace() method doesn't exist in this Langfuse version
-            import warnings
-            warnings.warn(
-                "Langfuse trace() method not available. Using dummy trace. "
-                "Please ensure you have langfuse>=2.0.0,<3.0.0 installed.",
-                UserWarning
-            )
-            return DummyTrace()
+            # Fallback: try alternative method if start_as_current_span doesn't exist
+            try:
+                observation_context = self.client.start_as_current_observation(
+                    name=name,
+                    as_type="span",
+                    metadata=trace_metadata
+                )
+                span_obj = observation_context.__enter__()
+                self.client.update_current_trace(session_id=session_id)
+                return TraceWrapper(span_obj, observation_context)
+            except (AttributeError, Exception):
+                import warnings
+                warnings.warn(
+                    "Langfuse span methods not available. Using dummy trace. "
+                    "Please ensure you have langfuse>=2.0.0,<3.0.0 installed.",
+                    UserWarning
+                )
+                return DummyTrace()
         except Exception as e:
             # Other error, log and fallback to dummy trace
             import warnings
@@ -127,6 +141,7 @@ class TracingManager:
         if isinstance(trace, DummyTrace):
             return trace  # Dummy trace returns itself
         
+        # TraceWrapper and Langfuse span objects both support span/start_span methods
         try:
             if hasattr(trace, 'span'):
                 return trace.span(
@@ -173,6 +188,7 @@ class TracingManager:
         if isinstance(trace, DummyTrace):
             return trace  # Dummy trace returns itself
         
+        # TraceWrapper and Langfuse span objects both support generation/start_generation methods
         try:
             if hasattr(trace, 'generation'):
                 return trace.generation(
@@ -197,6 +213,67 @@ class TracingManager:
                 return DummyTrace()
         except Exception:
             return DummyTrace()
+
+
+class TraceWrapper:
+    """Wrapper for Langfuse span that provides trace-like interface."""
+    
+    def __init__(self, span, context_manager):
+        self.span_obj = span
+        self.context_manager = context_manager
+    
+    def span(self, *args, **kwargs):
+        """Create a span - delegates to start_span if span() doesn't exist."""
+        if hasattr(self.span_obj, 'span'):
+            return self.span_obj.span(*args, **kwargs)
+        elif hasattr(self.span_obj, 'start_span'):
+            return self.span_obj.start_span(*args, **kwargs)
+        return self
+    
+    def generation(self, *args, **kwargs):
+        """Create a generation - delegates to start_generation if generation() doesn't exist."""
+        if hasattr(self.span_obj, 'generation'):
+            return self.span_obj.generation(*args, **kwargs)
+        elif hasattr(self.span_obj, 'start_generation'):
+            return self.span_obj.start_generation(*args, **kwargs)
+        return self
+    
+    def start_span(self, *args, **kwargs):
+        """Delegate to span object's start_span."""
+        if hasattr(self.span_obj, 'start_span'):
+            return self.span_obj.start_span(*args, **kwargs)
+        return self
+    
+    def start_generation(self, *args, **kwargs):
+        """Delegate to span object's start_generation."""
+        if hasattr(self.span_obj, 'start_generation'):
+            return self.span_obj.start_generation(*args, **kwargs)
+        return self
+    
+    def score(self, *args, **kwargs):
+        """Delegate score calls to span object if available."""
+        if hasattr(self.span_obj, 'score'):
+            return self.span_obj.score(*args, **kwargs)
+        pass
+    
+    def update(self, *args, **kwargs):
+        """Delegate update calls to span object if available."""
+        if hasattr(self.span_obj, 'update'):
+            return self.span_obj.update(*args, **kwargs)
+        pass
+    
+    def end(self, *args, **kwargs):
+        """End the span by exiting the context manager."""
+        if self.context_manager:
+            self.context_manager.__exit__(None, None, None)
+        pass
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, *args):
+        if self.context_manager:
+            self.context_manager.__exit__(*args)
 
 
 class DummyTrace:

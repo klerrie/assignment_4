@@ -2,7 +2,7 @@
 Pydantic models for contract change extraction output validation.
 """
 from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class ContractChangeOutput(BaseModel):
@@ -62,9 +62,8 @@ class ContractChangeOutput(BaseModel):
             raise ValueError("summary_of_the_change must be at least 50 characters long")
         return v.strip()
     
-    class Config:
-        """Pydantic configuration."""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "sections_changed": [
                     "Section 3: Payment Terms",
@@ -78,3 +77,4 @@ class ContractChangeOutput(BaseModel):
                 "summary_of_the_change": "The payment terms were extended from 30 to 45 days, and a new termination clause was added allowing either party to terminate with 60 days notice."
             }
         }
+    )

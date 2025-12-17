@@ -73,38 +73,52 @@ class TestImageParser:
             os.unlink(tmp_path)
     
     @patch('src.image_parser.OpenAI')
-    def test_parse_image_success(self, mock_openai_class):
+    @patch('src.tracing.tracing_manager')
+    def test_parse_image_success(self, mock_tracing, mock_openai_class):
         """Test successful image parsing."""
-        parser = ImageParser()
-        
         # Create a temporary image file
         with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
             tmp.write(b'fake image data')
             tmp_path = tmp.name
         
         try:
-            # Mock OpenAI client
+            # Mock OpenAI client - set up before creating parser
             mock_client = MagicMock()
             mock_openai_class.return_value = mock_client
             
+            # Mock response with proper structure - use spec to ensure proper behavior
+            mock_message = MagicMock()
+            mock_message.content = "Extracted contract text: Section 1: Definitions..."
+            
+            mock_choice = MagicMock()
+            mock_choice.message = mock_message
+            
+            mock_usage = MagicMock()
+            mock_usage.prompt_tokens = 500
+            mock_usage.completion_tokens = 200
+            mock_usage.total_tokens = 700
+            
+            # Create a proper list for choices to ensure len() works correctly
+            choices_list = [mock_choice]
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock()]
-            mock_response.choices[0].message.content = "Extracted contract text: Section 1: Definitions..."
-            mock_response.usage.prompt_tokens = 500
-            mock_response.usage.completion_tokens = 200
-            mock_response.usage.total_tokens = 700
+            # Use PropertyMock or set directly as a list
+            type(mock_response).choices = choices_list
+            mock_response.usage = mock_usage
             mock_client.chat.completions.create.return_value = mock_response
             
-            with patch('src.tracing.tracing_manager') as mock_tracing:
-                mock_trace = MagicMock()
-                mock_tracing.create_trace.return_value = mock_trace
-                
-                result = parser.parse_image(
-                    image_path=tmp_path,
-                    session_id="test_session",
-                    contract_id="test_contract",
-                    document_type="original"
-                )
+            # Mock tracing
+            mock_trace = MagicMock()
+            mock_tracing.create_trace.return_value = mock_trace
+            
+            # Now create parser (after mocks are set up)
+            parser = ImageParser()
+            
+            result = parser.parse_image(
+                image_path=tmp_path,
+                session_id="test_session",
+                contract_id="test_contract",
+                document_type="original"
+            )
             
             assert isinstance(result, str)
             assert "Extracted contract text" in result
